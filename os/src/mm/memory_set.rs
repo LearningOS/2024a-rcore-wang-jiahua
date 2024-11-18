@@ -262,6 +262,66 @@ impl MemorySet {
             false
         }
     }
+
+    /// map a new area
+    pub fn mmap(&mut self, start: usize, len: usize, port: usize) -> isize {
+        let start_va: VirtAddr = start.into();
+        if !start_va.aligned() {
+            return -1;
+        }
+        let mut start_vpn: VirtPageNum = start_va.into();
+        let mut flags = PTEFlags::from_bits(port as u8).unwrap();
+        if port & 0b0000_0001 != 0 {
+            flags |= PTEFlags::R;
+        }
+        if port & 0b0000_0010 != 0 {
+            flags |= PTEFlags::W;
+        }
+        if port & 0b0000_0100 != 0 {
+            flags |= PTEFlags::X;
+        }
+        flags |= PTEFlags::U;
+        flags |= PTEFlags::V;
+        let end_va: VirtAddr = (start + len).into();
+        let end_vpn: VirtPageNum = end_va.ceil();
+        while start_vpn != end_vpn {
+            if let Some(pte) = self.page_table.translate(start_vpn) {
+                if pte.is_valid() {
+                    return -1;
+                }
+            }
+            if let Some(ppn) = frame_alloc() {
+                self.page_table.map(start_vpn, ppn.ppn, flags);
+            } else {
+                return -1;
+            }
+            start_vpn.step();
+        }
+        0
+    }
+
+    /// unmap an area
+    pub fn unmmap(&mut self, start: usize, len: usize) -> isize {
+        let start_va: VirtAddr = start.into();
+        if !start_va.aligned() {
+            return -1;
+        }
+        let mut start_vpn: VirtPageNum = start_va.into();
+        let end_va: VirtAddr = (start + len).into();
+        let end_vpn: VirtPageNum = end_va.ceil();
+        while start_vpn != end_vpn {
+            if let Some(pte) = self.page_table.translate(start_vpn) {
+                if !pte.is_valid() {
+                    return -1;
+                }
+            } else {
+                return -1;
+            }
+            self.page_table.unmap(start_vpn);
+            start_vpn.step();
+        }
+        0
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
